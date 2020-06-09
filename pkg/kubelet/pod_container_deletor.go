@@ -19,8 +19,8 @@ package kubelet
 import (
 	"sort"
 
-	"github.com/golang/glog"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/klog/v2"
 	kubecontainer "k8s.io/kubernetes/pkg/kubelet/container"
 )
 
@@ -37,16 +37,20 @@ type podContainerDeletor struct {
 	containersToKeep int
 }
 
-func (a containerStatusbyCreatedList) Len() int           { return len(a) }
-func (a containerStatusbyCreatedList) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
-func (a containerStatusbyCreatedList) Less(i, j int) bool { return a[i].CreatedAt.After(a[j].CreatedAt) }
+func (a containerStatusbyCreatedList) Len() int      { return len(a) }
+func (a containerStatusbyCreatedList) Swap(i, j int) { a[i], a[j] = a[j], a[i] }
+func (a containerStatusbyCreatedList) Less(i, j int) bool {
+	return a[i].CreatedAt.After(a[j].CreatedAt)
+}
 
 func newPodContainerDeletor(runtime kubecontainer.Runtime, containersToKeep int) *podContainerDeletor {
 	buffer := make(chan kubecontainer.ContainerID, containerDeletorBufferLimit)
 	go wait.Until(func() {
 		for {
 			id := <-buffer
-			runtime.DeleteContainer(id)
+			if err := runtime.DeleteContainer(id); err != nil {
+				klog.Warningf("[pod_container_deletor] DeleteContainer returned error for (id=%v): %v", id, err)
+			}
 		}
 	}, 0, wait.NeverStop)
 
@@ -72,7 +76,7 @@ func getContainersToDeleteInPod(filterContainerID string, podStatus *kubecontain
 	}(filterContainerID, podStatus)
 
 	if filterContainerID != "" && matchedContainer == nil {
-		glog.Warningf("Container %q not found in pod's containers", filterContainerID)
+		klog.Warningf("Container %q not found in pod's containers", filterContainerID)
 		return containerStatusbyCreatedList{}
 	}
 
@@ -106,7 +110,7 @@ func (p *podContainerDeletor) deleteContainersInPod(filterContainerID string, po
 		select {
 		case p.worker <- candidate.ID:
 		default:
-			glog.Warningf("Failed to issue the request to remove container %v", candidate.ID)
+			klog.Warningf("Failed to issue the request to remove container %v", candidate.ID)
 		}
 	}
 }

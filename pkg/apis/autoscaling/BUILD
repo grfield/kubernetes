@@ -10,6 +10,7 @@ go_library(
     srcs = [
         "annotations.go",
         "doc.go",
+        "helpers.go",
         "register.go",
         "types.go",
         "zz_generated.deepcopy.go",
@@ -39,6 +40,7 @@ filegroup(
         "//pkg/apis/autoscaling/install:all-srcs",
         "//pkg/apis/autoscaling/v1:all-srcs",
         "//pkg/apis/autoscaling/v2beta1:all-srcs",
+        "//pkg/apis/autoscaling/v2beta2:all-srcs",
         "//pkg/apis/autoscaling/validation:all-srcs",
     ],
     tags = ["automanaged"],

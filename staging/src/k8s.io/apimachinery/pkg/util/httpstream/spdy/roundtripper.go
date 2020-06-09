@@ -67,22 +67,30 @@ type SpdyRoundTripper struct {
 	// followRedirects indicates if the round tripper should examine responses for redirects and
 	// follow them.
 	followRedirects bool
+	// requireSameHostRedirects restricts redirect following to only follow redirects to the same host
+	// as the original request.
+	requireSameHostRedirects bool
 }
 
 var _ utilnet.TLSClientConfigHolder = &SpdyRoundTripper{}
 var _ httpstream.UpgradeRoundTripper = &SpdyRoundTripper{}
 var _ utilnet.Dialer = &SpdyRoundTripper{}
 
-// NewRoundTripper creates a new SpdyRoundTripper that will use
-// the specified tlsConfig.
-func NewRoundTripper(tlsConfig *tls.Config, followRedirects bool) httpstream.UpgradeRoundTripper {
-	return NewSpdyRoundTripper(tlsConfig, followRedirects)
+// NewRoundTripper creates a new SpdyRoundTripper that will use the specified
+// tlsConfig.
+func NewRoundTripper(tlsConfig *tls.Config, followRedirects, requireSameHostRedirects bool) *SpdyRoundTripper {
+	return NewRoundTripperWithProxy(tlsConfig, followRedirects, requireSameHostRedirects, utilnet.NewProxierWithNoProxyCIDR(http.ProxyFromEnvironment))
 }
 
-// NewSpdyRoundTripper creates a new SpdyRoundTripper that will use
-// the specified tlsConfig. This function is mostly meant for unit tests.
-func NewSpdyRoundTripper(tlsConfig *tls.Config, followRedirects bool) *SpdyRoundTripper {
-	return &SpdyRoundTripper{tlsConfig: tlsConfig, followRedirects: followRedirects}
+// NewRoundTripperWithProxy creates a new SpdyRoundTripper that will use the
+// specified tlsConfig and proxy func.
+func NewRoundTripperWithProxy(tlsConfig *tls.Config, followRedirects, requireSameHostRedirects bool, proxier func(*http.Request) (*url.URL, error)) *SpdyRoundTripper {
+	return &SpdyRoundTripper{
+		tlsConfig:                tlsConfig,
+		followRedirects:          followRedirects,
+		requireSameHostRedirects: requireSameHostRedirects,
+		proxier:                  proxier,
+	}
 }
 
 // TLSClientConfig implements pkg/util/net.TLSClientConfigHolder for proper TLS checking during
@@ -109,11 +117,7 @@ func (s *SpdyRoundTripper) Dial(req *http.Request) (net.Conn, error) {
 // dial dials the host specified by req, using TLS if appropriate, optionally
 // using a proxy server if one is configured via environment variables.
 func (s *SpdyRoundTripper) dial(req *http.Request) (net.Conn, error) {
-	proxier := s.proxier
-	if proxier == nil {
-		proxier = utilnet.NewProxierWithNoProxyCIDR(http.ProxyFromEnvironment)
-	}
-	proxyURL, err := proxier(req)
+	proxyURL, err := s.proxier(req)
 	if err != nil {
 		return nil, err
 	}
@@ -257,7 +261,7 @@ func (s *SpdyRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) 
 	)
 
 	if s.followRedirects {
-		conn, rawResponse, err = utilnet.ConnectWithRedirects(req.Method, req.URL, header, req.Body, s)
+		conn, rawResponse, err = utilnet.ConnectWithRedirects(req.Method, req.URL, header, req.Body, s, s.requireSameHostRedirects)
 	} else {
 		clone := utilnet.CloneRequest(req)
 		clone.Header = header
